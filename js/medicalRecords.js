@@ -3,7 +3,8 @@ const MedicalRecords = {
     // Estado atual
     currentState: {
         selectedPatientId: null,
-        currentPatient: null
+        currentPatient: null,
+        selectedRecordId: null // NOVO: para controlar qual receita está selecionada
     },
 
     // Inicializar módulo
@@ -51,9 +52,13 @@ const MedicalRecords = {
         }
 
         const formData = new FormData(e.target);
+        
+        // CORREÇÃO: Usar data atual correta (sem problemas de timezone)
+        const dataAtendimento = formData.get('data-atendimento') || Utils.getCurrentDate();
+        
         const recordData = {
             patientId: this.currentState.selectedPatientId,
-            dataAtendimento: formData.get('data-atendimento'),
+            dataAtendimento: dataAtendimento, // Usando data corrigida
             queixaPrincipal: formData.get('queixa-principal'),
             evolucaoClinica: formData.get('evolucao-clinica'),
             prescricao: formData.get('prescricao'),
@@ -68,7 +73,9 @@ const MedicalRecords = {
         try {
             await this.createRecord(recordData);
             e.target.reset();
-            document.getElementById('data-atendimento').valueAsDate = new Date();
+            
+            // CORREÇÃO: Usar data atual correta no campo
+            document.getElementById('data-atendimento').value = Utils.getCurrentDate();
             
             // Recarregar histórico
             await this.loadPatientRecords(this.currentState.selectedPatientId);
@@ -131,6 +138,12 @@ const MedicalRecords = {
                 .sort((a, b) => new Date(b.dataAtendimento) - new Date(a.dataAtendimento));
             
             this.renderRecordHistory(records);
+            
+            // NOVO: Selecionar automaticamente o último atendimento
+            if (records.length > 0) {
+                this.currentState.selectedRecordId = records[0].id;
+            }
+            
         } catch (error) {
             console.error('Erro ao carregar histórico:', error);
             Utils.showAlert('record-alert', 'Erro ao carregar histórico', 'error');
@@ -152,9 +165,17 @@ const MedicalRecords = {
         }
 
         recordHistory.innerHTML = records.map(record => `
-            <div class="record-item">
-                <div class="record-date">
-                    ${Utils.formatDate(record.dataAtendimento)} - Dr. ${Utils.sanitizeInput(record.medico)}
+            <div class="record-item ${this.currentState.selectedRecordId === record.id ? 'selected-record' : ''}" 
+                 data-record-id="${record.id}">
+                <div class="record-header">
+                    <div class="record-date">
+                        ${Utils.formatDate(record.dataAtendimento)} - Dr. ${Utils.sanitizeInput(record.medico)}
+                    </div>
+                    <div class="record-actions">
+                        <button class="btn btn-small" onclick="MedicalRecords.selectRecordForPrint('${record.id}')">
+                            ${this.currentState.selectedRecordId === record.id ? '✅ Selecionado' : 'Selecionar para Impressão'}
+                        </button>
+                    </div>
                 </div>
                 <div class="record-content">
                     <h4>Queixa Principal / Anamnese</h4>
@@ -170,6 +191,29 @@ const MedicalRecords = {
                 </div>
             </div>
         `).join('');
+    },
+
+    // NOVO: Selecionar registro para impressão
+    selectRecordForPrint(recordId) {
+        this.currentState.selectedRecordId = recordId;
+        
+        // Atualizar visualmente qual está selecionado
+        document.querySelectorAll('.record-item').forEach(item => {
+            item.classList.remove('selected-record');
+        });
+        
+        const selectedItem = document.querySelector(`[data-record-id="${recordId}"]`);
+        if (selectedItem) {
+            selectedItem.classList.add('selected-record');
+            
+            // Atualizar texto do botão
+            const button = selectedItem.querySelector('.record-actions button');
+            if (button) {
+                button.textContent = '✅ Selecionado';
+            }
+        }
+        
+        Utils.showAlert('record-alert', 'Receita selecionada para impressão!', 'success');
     },
 
     // Mostrar modal de seleção de paciente
@@ -235,6 +279,7 @@ const MedicalRecords = {
 
         this.currentState.selectedPatientId = patientId;
         this.currentState.currentPatient = patient;
+        this.currentState.selectedRecordId = null; // Resetar seleção de receita
 
         // Atualizar interface
         this.updatePatientInfo(patient);
@@ -268,17 +313,21 @@ const MedicalRecords = {
             return;
         }
 
-        const records = Database.getRecordsByPatient(this.currentState.selectedPatientId)
-            .sort((a, b) => new Date(b.dataAtendimento) - new Date(a.dataAtendimento));
-        
-        const lastRecord = records[0];
-        
-        if (!lastRecord) {
-            Utils.showAlert('record-alert', 'Nenhum atendimento registrado para este paciente.', 'error');
+        // NOVO: Verificar se há uma receita selecionada
+        if (!this.currentState.selectedRecordId) {
+            Utils.showAlert('record-alert', 'Por favor, selecione um atendimento para imprimir a receita.', 'error');
             return;
         }
 
-        this.generatePrescriptionPrint(this.currentState.currentPatient, lastRecord);
+        const records = Database.getRecordsByPatient(this.currentState.selectedPatientId);
+        const selectedRecord = records.find(record => record.id === this.currentState.selectedRecordId);
+        
+        if (!selectedRecord) {
+            Utils.showAlert('record-alert', 'Atendimento selecionado não encontrado.', 'error');
+            return;
+        }
+
+        this.generatePrescriptionPrint(this.currentState.currentPatient, selectedRecord);
     },
 
     // Imprimir encaminhamento

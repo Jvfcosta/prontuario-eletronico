@@ -37,9 +37,9 @@ const UI = {
         });
     },
 
-    // Inicializar campos de data
+    // Inicializar campos de data CORRIGIDO
     initializeDateFields() {
-        const today = new Date().toISOString().split('T')[0];
+        const today = Utils.getCurrentDate(); // Usar função corrigida
         const dataAtendimento = document.getElementById('data-atendimento');
         
         if (dataAtendimento) {
